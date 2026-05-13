@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from app.api.schemas import SearchGraphMeta, SearchGraphRequest, SearchGraphResponse
+from app.api.schemas import SearchGraphMetadata, SearchGraphRequest, SearchGraphResponse
 from app.core.config import Settings, get_settings
 
 router = APIRouter()
@@ -16,7 +16,7 @@ def search_graph(
     """
     return SearchGraphResponse(
         nodes=[],
-        meta=SearchGraphMeta(
+        meta=SearchGraphMetadata(
             term=body.term,
             timings_s={},
             counts={"nodes": 0},
