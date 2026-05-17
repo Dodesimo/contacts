@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     openalex_api_key: str
     openalex_mailto: str
     openalex_base_url: str = "https://api.openalex.org"
+    openalex_request_delay_s: float = 0.12
 
 
 @lru_cache
