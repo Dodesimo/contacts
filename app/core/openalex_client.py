@@ -8,6 +8,8 @@ import httpx
 from app.core.config import Settings
 from app.core.graph_store import normalize_openalex_work_id
 
+PER_PAGE = 25
+
 
 def reconstruct_abstract_from_inverted_index(inv: dict[str, list[int]] | None) -> str | None:
     if not inv:
@@ -90,7 +92,7 @@ class OpenAlexClient:
             raise RuntimeError("OpenAlex returned non-object JSON")
         return data
 
-    def search_works(self, term: str, *, max_results: int, per_page: int) -> list[dict[str, Any]]:
+    def search_works(self, term: str, *, max_results: int) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
         page = 1
         while len(results) < max_results:
@@ -98,7 +100,7 @@ class OpenAlexClient:
                 "works",
                 params={
                     "search": term,
-                    "per_page": min(per_page, max_results - len(results)),
+                    "per_page": min(PER_PAGE, max_results - len(results)),
                     "page": page,
                 },
             )
@@ -106,7 +108,7 @@ class OpenAlexClient:
             if not batch:
                 break
             results.extend(batch)
-            if len(batch) < per_page:
+            if len(batch) < PER_PAGE:
                 break
             page += 1
         return results[:max_results]
@@ -136,7 +138,7 @@ class OpenAlexClient:
             out.extend(data.get("results") or [])
         return out
 
-    def list_works_filter(self, filter_expr: str, *, per_page: int, max_results: int) -> list[dict[str, Any]]:
+    def list_works_filter(self, filter_expr: str, *, max_results: int) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         page = 1
         while len(out) < max_results:
@@ -144,7 +146,7 @@ class OpenAlexClient:
                 "works",
                 params={
                     "filter": filter_expr,
-                    "per_page": min(per_page, max_results - len(out)),
+                    "per_page": min(PER_PAGE, max_results - len(out)),
                     "page": page,
                 },
             )
@@ -152,18 +154,18 @@ class OpenAlexClient:
             if not batch:
                 break
             out.extend(batch)
-            if len(batch) < per_page:
+            if len(batch) < PER_PAGE:
                 break
             page += 1
         return out[:max_results]
 
-    def citing_works(self, work_id: str, *, per_page: int, max_results: int) -> list[dict[str, Any]]:
+    def citing_works(self, work_id: str, *, max_results: int) -> list[dict[str, Any]]:
         wid = normalize_openalex_work_id(work_id) or work_id
-        return self.list_works_filter(f"cites:{wid}", per_page=per_page, max_results=max_results)
+        return self.list_works_filter(f"cites:{wid}", max_results=max_results)
 
-    def cited_by_works(self, work_id: str, *, per_page: int, max_results: int) -> list[dict[str, Any]]:
+    def cited_by_works(self, work_id: str, *, max_results: int) -> list[dict[str, Any]]:
         wid = normalize_openalex_work_id(work_id) or work_id
-        return self.list_works_filter(f"cited_by:{wid}", per_page=per_page, max_results=max_results)
+        return self.list_works_filter(f"cited_by:{wid}", max_results=max_results)
 
     def related_work_objects(self, raw_work: dict[str, Any], *, max_results: int) -> list[dict[str, Any]]:
         rel = raw_work.get("related_works") or []

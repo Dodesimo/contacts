@@ -40,7 +40,6 @@ def _expand_seed(
     raw_seed: dict[str, Any] | None,
     *,
     max_neighbors: int,
-    per_page: int,
 ) -> list[tuple[str, dict[str, Any]]]:
     """Return deduped (subtype, raw_work) pairs from citing, cited_by, and related."""
     if raw_seed is None:
@@ -62,9 +61,9 @@ def _expand_seed(
                 return
 
     per_type = max(1, max_neighbors // 3)
-    add_batch("citing", oa.citing_works(seed_id, per_page=per_page, max_results=per_type))
+    add_batch("citing", oa.citing_works(seed_id, max_results=per_type))
     if len(out) < max_neighbors:
-        add_batch("cited_by", oa.cited_by_works(seed_id, per_page=per_page, max_results=per_type))
+        add_batch("cited_by", oa.cited_by_works(seed_id, max_results=per_type))
     if len(out) < max_neighbors and raw_seed is not None:
         add_batch("related", oa.related_work_objects(raw_seed, max_results=per_type))
 
@@ -89,7 +88,6 @@ def run_search_graph(request: SearchGraphRequest, settings: Settings) -> SearchG
             initial = oa.search_works(
                 request.term,
                 max_results=request.max_initial_works,
-                per_page=request.per_page,
             )
         except Exception as exc:  # noqa: BLE001
             errors.append(f"search:{exc}")
@@ -119,7 +117,6 @@ def run_search_graph(request: SearchGraphRequest, settings: Settings) -> SearchG
                         seed_id,
                         raw_cache.get(seed_id),
                         max_neighbors=request.max_neighbors_per_seed,
-                        per_page=request.per_page,
                     )
                 except Exception as exc:  # noqa: BLE001
                     errors.append(f"expand:{seed_id}:{exc}")
