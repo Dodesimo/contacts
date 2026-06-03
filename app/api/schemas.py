@@ -11,6 +11,12 @@ class SearchGraphRequest(BaseModel):
     max_initial_works: int = Field(default=25, ge=1, le=200)
     max_neighbors_per_seed: int = Field(default=25, ge=1, le=100)
     max_total_works: int = Field(default=500, ge=1, le=5000)
+    expansion_top_k: int = Field(
+        default=20,
+        ge=1,
+        le=200,
+        description="During layer expansion, only continue the top K neighbors by abstract TF-IDF vs the original article.",
+    )
 
 
 class ConsideredNeighbor(BaseModel):
