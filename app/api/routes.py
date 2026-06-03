@@ -7,6 +7,11 @@ from app.search import run_search_graph
 router = APIRouter()
 
 
+@router.get("/")
+def root() -> dict[str, str]:
+    return {"service": "contacts", "docs": "/docs"}
+
+
 @router.post("/search-graph", response_model=SearchGraphResponse)
 def search_graph(
     body: SearchGraphRequest,
