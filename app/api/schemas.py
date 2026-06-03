@@ -15,7 +15,7 @@ class SearchGraphRequest(BaseModel):
         default=20,
         ge=1,
         le=200,
-        description="During layer expansion, only continue the top K neighbors by abstract TF-IDF vs the original article.",
+        description="During layer expansion, only continue the top K neighbors by Okapi BM25 vs the original article.",
     )
 
 
