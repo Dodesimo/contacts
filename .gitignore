@@ -1,5 +1,15 @@
-venv/
+.vercel/
+*.log
+*.pyc
 __pycache__/
 app/__pycache__/
 app/api/__pycache__/
 app/core/__pycache__/
+
+# Environments
+.env
+.venv/
+venv/
+ENV/
+env/
+.vercel
