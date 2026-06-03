@@ -15,10 +15,20 @@ from app.api.schemas import (
 from app.core.config import Settings
 from app.core.graph_store import ResearchGraphStore, normalize_openalex_work_id
 from app.core.openalex_client import OpenAlexClient, normalize_work
+from app.core.bm25 import top_k_by_bm25
 
 
 def _rank_score(rank: int) -> float:
     return 1.0 / (1.0 + rank)
+
+
+def _abstract_text(raw: dict[str, Any] | None) -> str | None:
+    if not raw:
+        return None
+    abstract = normalize_work(raw).get("abstract")
+    if isinstance(abstract, str) and abstract.strip():
+        return abstract.strip()
+    return None
 
 
 def _add_work(
@@ -100,12 +110,16 @@ def run_search_graph(request: SearchGraphRequest, settings: Settings) -> SearchG
                 frontier.append(wid)
 
         layers_completed = 1 if frontier else 0
+        original_id = frontier[0] if frontier else None
+        original_abstract = _abstract_text(raw_cache.get(original_id)) if original_id else None
 
         for layer in range(1, MAX_LAYERS):
             if not frontier:
                 break
 
             next_frontier: list[str] = []
+            layer_continue_candidates: list[str] = []
+            pending_adjacency: list[tuple[str, list[ConsideredNeighbor]]] = []
 
             for seed_id in frontier:
                 if store.count_nodes() >= request.max_total_works:
@@ -141,23 +155,49 @@ def run_search_graph(request: SearchGraphRequest, settings: Settings) -> SearchG
                         continue
 
                     _add_work(store, raw, raw_cache)
-                    continued = wid not in seen
-                    if continued:
-                        seen.add(wid)
-                        next_frontier.append(wid)
+                    if wid not in seen:
+                        layer_continue_candidates.append(wid)
 
                     adjacency.append(
                         ConsideredNeighbor(
                             work_id=wid,
                             relevancy_score=_rank_score(rank),
-                            continued=continued,
+                            continued=False,
                             context="expansion",
                             expansion_subtype=subtype,
                         )
                     )
 
                 if adjacency:
-                    store.append_adjacency(seed_id, adjacency)
+                    pending_adjacency.append((seed_id, adjacency))
+
+            candidate_abstracts: dict[str, str] = {}
+            for wid in dict.fromkeys(layer_continue_candidates):
+                abstract = _abstract_text(raw_cache.get(wid))
+                if abstract:
+                    candidate_abstracts[wid] = abstract
+
+            continue_ids, bm25_scores = top_k_by_bm25(
+                original_abstract,
+                candidate_abstracts,
+                top_k=request.expansion_top_k,
+                fallback_order=layer_continue_candidates,
+            )
+            continue_set = set(continue_ids)
+
+            for wid in continue_ids:
+                if wid not in seen:
+                    seen.add(wid)
+                    next_frontier.append(wid)
+
+            for seed_id, adjacency in pending_adjacency:
+                for entry in adjacency:
+                    if entry.work_id in continue_set:
+                        entry.continued = True
+                    score = bm25_scores.get(entry.work_id)
+                    if score is not None:
+                        entry.relevancy_score = score
+                store.append_adjacency(seed_id, adjacency)
 
             frontier = next_frontier
             layers_completed = layer + 1
