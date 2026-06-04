@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 import os
@@ -18,6 +19,7 @@ class Settings(BaseSettings):
     openalex_mailto: str | None = os.getenv("OPENALEX_MAILTO")
     openalex_base_url: str = "https://api.openalex.org"
     openalex_request_delay_s: float = 0.12
+    openalex_max_workers: int = Field(default=8, ge=1, le=32)
 
 
 @lru_cache
