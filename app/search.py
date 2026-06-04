@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import httpx
@@ -80,6 +81,70 @@ def _expand_seed(
     return out[:max_neighbors]
 
 
+def _expand_seed_task(
+    oa: OpenAlexClient,
+    seed_id: str,
+    raw_seed: dict[str, Any] | None,
+    *,
+    max_neighbors: int,
+) -> tuple[str, list[tuple[str, dict[str, Any]]], str | None]:
+    try:
+        neighbors = _expand_seed(
+            oa,
+            seed_id,
+            raw_seed,
+            max_neighbors=max_neighbors,
+        )
+        return seed_id, neighbors, None
+    except Exception as exc:  # noqa: BLE001
+        return seed_id, [], f"expand:{seed_id}:{exc}"
+
+
+def _process_seed_neighbors(
+    store: ResearchGraphStore,
+    raw_cache: dict[str, dict[str, Any]],
+    seen: set[str],
+    request: SearchGraphRequest,
+    seed_id: str,
+    neighbors: list[tuple[str, dict[str, Any]]],
+) -> tuple[list[ConsideredNeighbor], list[str]]:
+    adjacency: list[ConsideredNeighbor] = []
+    layer_continue_candidates: list[str] = []
+
+    for rank, (subtype, raw) in enumerate(neighbors):
+        wid = normalize_openalex_work_id(raw.get("id"))
+        if not wid:
+            continue
+
+        if not store.has_node(wid) and store.count_nodes() >= request.max_total_works:
+            adjacency.append(
+                ConsideredNeighbor(
+                    work_id=wid,
+                    relevancy_score=_rank_score(rank),
+                    continued=False,
+                    context="expansion",
+                    expansion_subtype=subtype,
+                )
+            )
+            continue
+
+        _add_work(store, raw, raw_cache)
+        if wid not in seen:
+            layer_continue_candidates.append(wid)
+
+        adjacency.append(
+            ConsideredNeighbor(
+                work_id=wid,
+                relevancy_score=_rank_score(rank),
+                continued=False,
+                context="expansion",
+                expansion_subtype=subtype,
+            )
+        )
+
+    return adjacency, layer_continue_candidates
+
+
 def run_search_graph(request: SearchGraphRequest, settings: Settings) -> SearchGraphResponse:
     store = ResearchGraphStore()
     raw_cache: dict[str, dict[str, Any]] = {}
@@ -121,55 +186,43 @@ def run_search_graph(request: SearchGraphRequest, settings: Settings) -> SearchG
             layer_continue_candidates: list[str] = []
             pending_adjacency: list[tuple[str, list[ConsideredNeighbor]]] = []
 
+            frontier_slice: list[str] = []
             for seed_id in frontier:
                 if store.count_nodes() >= request.max_total_works:
                     break
+                frontier_slice.append(seed_id)
 
-                try:
-                    neighbors = _expand_seed(
+            t_layer_expand = time.perf_counter()
+            max_workers = min(settings.openalex_max_workers, len(frontier_slice)) or 1
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = [
+                    pool.submit(
+                        _expand_seed_task,
                         oa,
                         seed_id,
                         raw_cache.get(seed_id),
                         max_neighbors=request.max_neighbors_per_seed,
                     )
-                except Exception as exc:  # noqa: BLE001
-                    errors.append(f"expand:{seed_id}:{exc}")
-                    continue
-
-                adjacency: list[ConsideredNeighbor] = []
-                for rank, (subtype, raw) in enumerate(neighbors):
-                    wid = normalize_openalex_work_id(raw.get("id"))
-                    if not wid:
+                    for seed_id in frontier_slice
+                ]
+                for fut in as_completed(futures):
+                    seed_id, neighbors, err = fut.result()
+                    if err:
+                        errors.append(err)
                         continue
-
-                    if not store.has_node(wid) and store.count_nodes() >= request.max_total_works:
-                        adjacency.append(
-                            ConsideredNeighbor(
-                                work_id=wid,
-                                relevancy_score=_rank_score(rank),
-                                continued=False,
-                                context="expansion",
-                                expansion_subtype=subtype,
-                            )
-                        )
-                        continue
-
-                    _add_work(store, raw, raw_cache)
-                    if wid not in seen:
-                        layer_continue_candidates.append(wid)
-
-                    adjacency.append(
-                        ConsideredNeighbor(
-                            work_id=wid,
-                            relevancy_score=_rank_score(rank),
-                            continued=False,
-                            context="expansion",
-                            expansion_subtype=subtype,
-                        )
+                    adjacency, candidates = _process_seed_neighbors(
+                        store,
+                        raw_cache,
+                        seen,
+                        request,
+                        seed_id,
+                        neighbors,
                     )
+                    layer_continue_candidates.extend(candidates)
+                    if adjacency:
+                        pending_adjacency.append((seed_id, adjacency))
 
-                if adjacency:
-                    pending_adjacency.append((seed_id, adjacency))
+            timings[f"layer_{layer}_expand"] = time.perf_counter() - t_layer_expand
 
             candidate_abstracts: dict[str, str] = {}
             for wid in dict.fromkeys(layer_continue_candidates):
