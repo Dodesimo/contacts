@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -68,6 +69,7 @@ class OpenAlexClient:
         self._settings = settings
         self._client = client
         self._delay_s = settings.openalex_request_delay_s
+        self._throttle_lock = threading.Lock()
 
     def _headers(self) -> dict[str, str]:
         return {"User-Agent": f"OpenAlexResearchGraph/0.1 (mailto:{self._settings.openalex_mailto})"}
@@ -80,14 +82,15 @@ class OpenAlexClient:
             time.sleep(self._delay_s)
 
     def get_json(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        self._throttle()
-        url = f"{self._settings.openalex_base_url.rstrip('/')}/{path.lstrip('/')}"
-        query: dict[str, Any] = dict[str, Any](self._base_params())
-        if params:
-            query.update({k: v for k, v in params.items() if v is not None})
-        response = self._client.get(url, params=query, headers=self._headers(), timeout=60.0)
-        response.raise_for_status()
-        data = response.json()
+        with self._throttle_lock:
+            self._throttle()
+            url = f"{self._settings.openalex_base_url.rstrip('/')}/{path.lstrip('/')}"
+            query: dict[str, Any] = dict[str, Any](self._base_params())
+            if params:
+                query.update({k: v for k, v in params.items() if v is not None})
+            response = self._client.get(url, params=query, headers=self._headers(), timeout=60.0)
+            response.raise_for_status()
+            data = response.json()
         if not isinstance(data, dict):
             raise RuntimeError("OpenAlex returned non-object JSON")
         return data
