@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends
 
 from app.api.schemas import SearchGraphRequest, SearchGraphResponse
@@ -13,11 +15,12 @@ def root() -> dict[str, str]:
 
 
 @router.post("/search-graph", response_model=SearchGraphResponse)
-def search_graph(
+async def search_graph(
     body: SearchGraphRequest,
     settings: Settings = Depends(get_settings),
 ) -> SearchGraphResponse:
-    return run_search_graph(body, settings)
+    return await asyncio.to_thread(run_search_graph, body, settings)
+
 
 
 @router.get("/health")
